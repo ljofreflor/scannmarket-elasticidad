@@ -1,0 +1,198 @@
+---
+title: "Elasticidad Precio-Demanda: Análisis Profesional"
+author: "Leonardo Jofré | Data Scientist"
+date: "2025-07-18"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    theme: cerulean
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(knitr)
+library(magrittr)
+```
+
+# Introducción
+
+Este informe analiza la **elasticidad precio-demanda** de los productos, utilizando modelos estadísticos avanzados para obtener estimaciones robustas y útiles para la toma de decisiones comerciales.
+
+En el análisis de elasticidad precio-demanda, es fundamental entender cómo el precio afecta las ventas y qué otros factores pueden influir en la relación. Por eso, se parte de un **modelo base** de regresión lineal simple, que estima el efecto del precio sobre la cantidad vendida sin considerar otras fuentes de variabilidad.
+
+Sin embargo, en mercados reales existen múltiples fuentes de heterogeneidad: diferencias entre productos, puntos de venta, estacionalidad, promociones, etc. Para capturar esta complejidad y obtener estimaciones más robustas y realistas, se avanza a un **modelo mixto** que incorpora efectos aleatorios y fijos adicionales. Este enfoque permite:
+
+- Controlar por la variabilidad entre tiendas y productos.
+- Ajustar por estacionalidad y otros factores estructurales.
+- Obtener una elasticidad más precisa y útil para decisiones comerciales.
+
+La comparación entre ambos modelos permite cuantificar cuánto aporta el precio por sí solo y cuánto mejora la explicación de las ventas al considerar la estructura completa del mercado.
+
+---
+
+# Datos y Preprocesamiento
+
+```{r}
+library(dplyr)
+library(lme4)
+# Cargar datos
+raw <- read.csv('datos/ventas_procesadas.csv')
+# Resumen inicial
+glimpse(raw)
+# Limpieza y preparación
+data <- raw %>%
+  filter(!is.na(log_cant_vta), !is.na(log_precio)) %>%
+  filter(is.finite(log_cant_vta), is.finite(log_precio)) %>%
+  mutate(
+    mes = as.factor(mes),
+    pdv_codigo = as.factor(pdv_codigo),
+    codigo_barras = as.factor(codigo_barras)
+  )
+```
+
+---
+
+# Modelo Base: Regresión Lineal Simple
+
+```{r}
+modelo_base <- lm(log_cant_vta ~ log_precio, data = data)
+base_summary <- summary(modelo_base)
+kable(base_summary$coefficients, caption = 'Coeficientes modelo base', digits = 4)
+cat('R²:', round(base_summary$r.squared, 4), '\n')
+```
+
+> **Interpretación:** El modelo base estima la elasticidad sin controlar por estacionalidad ni heterogeneidad. Su poder explicativo es limitado.
+
+---
+
+# Modelo Mixto: Efectos Aleatorios y Estacionales
+
+```{r}
+modelo_mixto <- lmer(log_cant_vta ~ log_precio + mes + (1 | pdv_codigo) + (1 | codigo_barras), data = data)
+mixto_summary <- summary(modelo_mixto)
+kable(mixto_summary$coefficients, caption = 'Coeficientes modelo mixto', digits = 4)
+print(paste('AIC:', round(AIC(modelo_mixto), 2), '| BIC:', round(BIC(modelo_mixto), 2)))
+
+# Mostrar el summary completo
+print(mixto_summary)
+
+# Analizar varianzas de los efectos aleatorios
+var_pdvs <- as.numeric(mixto_summary$varcor$pdv_codigo)
+var_skus <- as.numeric(mixto_summary$varcor$codigo_barras)
+var_residual <- attr(mixto_summary$varcor, 'sc')^2
+print(paste('Varianza PDV:', round(var_pdvs, 4)))
+print(paste('Varianza SKU:', round(var_skus, 4)))
+print(paste('Varianza residual:', round(var_residual, 4)))
+```
+
+### Análisis de varianzas y conclusiones
+
+- **Varianza de PDV (punto de venta):** Indica la dispersión de ventas entre tiendas. Valores altos sugieren que el comportamiento de ventas varía mucho entre locales.
+- **Varianza de SKU (código de barras):** Mide la heterogeneidad entre productos. Si es alta, los productos tienen patrones de venta muy distintos.
+- **Varianza residual:** Es la parte no explicada por el modelo. Un valor bajo indica que el modelo captura bien la variabilidad de las ventas.
+- **Conclusión:** Si las varianzas de los efectos aleatorios son altas, hay mucha heterogeneidad entre tiendas y productos. Si la varianza residual es baja, el modelo explica bien la variabilidad y es adecuado para estimar elasticidad y tomar decisiones de pricing.
+
+### Análisis de varianza de los efectos aleatorios
+
+El modelo mixto estima las siguientes varianzas:
+
+- **Varianza PDV (punto de venta):** 0.0189
+- **Varianza SKU (producto):** 0.0201
+- **Varianza residual:** 0.1749
+
+**Interpretación detallada:**
+
+- La **varianza de PDV** (0.0189) indica que existen diferencias moderadas en el nivel base de ventas entre los distintos puntos de venta. Esto sugiere que el canal o local donde se comercializa el producto tiene un impacto relevante, pero no extremo, en la cantidad vendida.
+- La **varianza de SKU** (0.0201) muestra que los productos (códigos de barras) también presentan heterogeneidad en sus ventas. Es decir, hay diferencias entre productos, pero la magnitud es similar a la de los PDV, lo que implica que tanto el tipo de producto como el punto de venta contribuyen de forma comparable a la variabilidad total.
+- La **varianza residual** (0.1749) es considerablemente mayor que las varianzas de los efectos aleatorios. Esto significa que, aunque el modelo captura parte de la heterogeneidad entre tiendas y productos, aún existe una proporción importante de variabilidad en las ventas que no es explicada por los factores incluidos (precio, mes, PDV, SKU).
+
+**Conclusión práctica:**
+
+- El modelo mixto logra controlar parcialmente la heterogeneidad estructural del mercado, pero la mayor parte de la variabilidad de las ventas se debe a factores no modelados (por ejemplo, promociones, competencia, estacionalidad fina, quiebres de stock, etc.).
+- Para mejorar la capacidad explicativa del modelo, sería recomendable incorporar más covariables relevantes o información adicional sobre el contexto comercial.
+- La elasticidad estimada bajo este modelo es robusta y confiable para decisiones de pricing, pero se debe considerar que existen fuentes de variabilidad no capturadas que pueden afectar la precisión de las predicciones en escenarios específicos.
+
+---
+
+# Visualización: Efecto del Precio
+
+```{r, fig.width=7, fig.height=4}
+library(ggplot2)
+ggplot(data, aes(x = log_precio, y = log_cant_vta)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = 'lm', color = 'blue', se = FALSE) +
+  labs(title = 'Relación log(precio) vs log(cantidad vendida)', x = 'log(precio)', y = 'log(cant_vta)') +
+  theme_minimal()
+```
+
+---
+
+# Resultados y Conclusiones
+
+```{r}
+elasticidad <- fixef(modelo_mixto)["log_precio"]
+cat('Elasticidad estimada (modelo mixto):', round(elasticidad, 4), '\n')
+if (elasticidad < -1) {
+  cat('Demanda elástica: consumidores muy sensibles al precio\n')
+} else if (elasticidad > -1 && elasticidad < 0) {
+  cat('Demanda inelástica: consumidores poco sensibles al precio\n')
+} else {
+  cat('Elasticidad inusual: revisar modelo o datos\n')
+}
+```
+
+### Interpretación del coeficiente de log(precio) en el modelo mixto
+
+- El coeficiente estimado para **log(precio)** en el modelo mixto representa la elasticidad precio-demanda controlando por estacionalidad y heterogeneidad entre tiendas y productos.
+- Por ejemplo, si el coeficiente es **–0.95**, esto significa que un aumento del 1% en el precio genera una disminución aproximada del 0.95% en la cantidad vendida, manteniendo constantes los demás factores.
+- Este valor indica una **demanda casi unitaria**: los consumidores responden de forma proporcional a los cambios de precio, lo que implica que la política de precios tiene un impacto directo y relevante en el volumen de ventas.
+
+### Acciones comerciales recomendadas
+
+- **Ajuste de precios:** Dado que la demanda es sensible al precio, se recomienda analizar cuidadosamente cualquier incremento, ya que puede traducirse en una caída proporcional de las ventas. Si el objetivo es maximizar ingresos, se puede calcular el punto óptimo de precio considerando la elasticidad estimada.
+- **Segmentación de productos y tiendas:** Las varianzas encontradas sugieren que existen diferencias entre productos y puntos de venta. Se recomienda personalizar estrategias de pricing y promociones según el tipo de producto y el canal.
+- **Promociones focalizadas:** Para productos o tiendas con mayor sensibilidad al precio, implementar descuentos temporales puede generar incrementos significativos en el volumen vendido.
+- **Monitoreo continuo:** Dado que existe variabilidad residual no explicada, es importante monitorear el mercado y ajustar el modelo con nuevas variables relevantes (promociones, competencia, estacionalidad fina, etc.) para mejorar la precisión de las predicciones.
+
+- La elasticidad estimada es **robusta (estadísticamente significativa) y útil** para decisiones de pricing.
+
+---
+
+# Apéndice: Comparación de Modelos
+
+```{r}
+# Comparación de varianza explicada por log_precio
+# Modelo base: R² ya representa la varianza explicada total por log_precio
+var_exp_base <- base_summary$r.squared
+
+# Modelo mixto: calcular el marginal R² (efectos fijos) y el condicional R² (efectos fijos + aleatorios)
+library(MuMIn)
+r2_mixto <- r.squaredGLMM(modelo_mixto)
+var_exp_mixto_marginal <- r2_mixto[1] # Solo efectos fijos (incluye log_precio)
+var_exp_mixto_condicional <- r2_mixto[2] # Efectos fijos + aleatorios
+
+comp <- data.frame(
+  Modelo = c('Base', 'Mixto'),
+  Elasticidad = c(coef(modelo_base)["log_precio"], fixef(modelo_mixto)["log_precio"]),
+  R2_total = c(var_exp_base, var_exp_mixto_condicional),
+  R2_log_precio = c(var_exp_base, var_exp_mixto_marginal),
+  AIC = c(AIC(modelo_base), AIC(modelo_mixto)),
+  BIC = c(BIC(modelo_base), BIC(modelo_mixto))
+)
+kable(comp, caption = 'Comparación de modelos y varianza explicada', digits = 4)
+```
+
+### Interpretación de la varianza explicada
+
+- En el **modelo base**, el R² representa la proporción de la varianza total de las ventas explicada únicamente por el precio. Si el valor es bajo, el precio por sí solo no explica gran parte de la variabilidad.
+- En el **modelo mixto**, el R² marginal indica la varianza explicada por los efectos fijos (incluyendo log_precio y mes), mientras que el R² condicional incluye también los efectos aleatorios (PDV y SKU). Comparar ambos valores permite ver cuánto aporta el precio y los efectos fijos respecto a la estructura completa del modelo.
+- Si el R² marginal del modelo mixto es mucho mayor que el R² del modelo base, significa que el precio y los efectos fijos explican mejor la variabilidad cuando se controla por heterogeneidad. Si el R² condicional es mucho mayor, los efectos aleatorios (diferencias entre tiendas y productos) son relevantes para explicar las ventas.
+
+---
+
+# Referencias
+
+- Bates, D., Mächler, M., Bolker, B., & Walker, S. (2015). Fitting Linear Mixed-Effects Models Using lme4. *Journal of Statistical Software*, 67(1), 1–48.
+- R Core Team (2025). *R: A language and environment for statistical computing*. R Foundation for Statistical Computing, Vienna, Austria.

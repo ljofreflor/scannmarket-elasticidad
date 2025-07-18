@@ -1,0 +1,8 @@
+
+data <- read.csv('datos/ventas_procesadas.csv')
+library(lme4)
+
+# Modelo de regresión lineal mixto
+modelo <- lmer(log_cant_vta ~ log_precio + factor(mes) + (1 | pdv_codigo) + (1 | codigo_barras), 
+                data = data)
+summary(modelo)
